@@ -3,8 +3,7 @@
 Run:
 
 ```bash
-docker build -t duck -f Containerfile .
-docker run --rm -p 8000:8000 duck
+docker run --rm -p 8000:8000 ghcr.io/deoktr/duck:latest
 ```
 
 Curl:
