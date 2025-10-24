@@ -1,17 +1,19 @@
-FROM docker.io/library/golang:1.24 AS build
+FROM docker.io/library/golang:1.25.3-alpine AS build
 
-WORKDIR /src
+ARG VERSION=dev
+
+WORKDIR /app
 
 COPY go.mod ./
 RUN go mod download
 
 COPY *.go .
-RUN go build -o /go/bin/duck
+RUN go build -o /duck \
+	-buildvcs=false \
+	-trimpath \
+	-ldflags "-X 'main.Version=${VERSION}'"
 
-FROM gcr.io/distroless/base-debian12:nonroot
+FROM scratch
 
-USER nonroot
-
-COPY --from=build /go/bin/duck /usr/bin/duck
-ENTRYPOINT [ "/usr/bin/duck" ]
-CMD [ "-addr=0.0.0.0:8000" ]
+COPY --from=build /duck /duck
+CMD ["/duck"]

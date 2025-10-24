@@ -10,18 +10,43 @@ import (
 	"time"
 )
 
-const VERSION = "1.0.0"
+var Version = "dev"
 
 var (
-	addr    string
-	refresh time.Duration
+	addr    string        = "0.0.0.0:8000"
+	refresh time.Duration = 100 * time.Millisecond
 )
 
 var (
-	CLEAR           = []byte("\x1b[2J")
-	CURSOR_TOP_LEFT = []byte("\x1b[1;1H")
-	HIDE_CURSOR     = []byte("\x1b[?25l")
+	clearTerm     = []byte("\x1b[2J")
+	cursorTopLeft = []byte("\x1b[1;1H")
+	hideCursor    = []byte("\x1b[?25l")
 )
+
+const maxInt = int(^uint(0) >> 1)
+
+func joinBytes(s [][]byte) []byte {
+	if len(s) == 0 {
+		return []byte{}
+	} else if len(s) == 1 {
+		return append([]byte(nil), s[0]...)
+	}
+
+	var n int
+	for _, v := range s {
+		if len(v) > maxInt-n {
+			panic("bytes: Join output length overflow")
+		}
+		n += len(v)
+	}
+
+	b := make([]byte, n)
+	bp := copy(b, s[0])
+	for _, v := range s[1:] {
+		bp += copy(b[bp:], v)
+	}
+	return b
+}
 
 func randFg() []byte {
 	fg := (rand.Int() % 5) + 90
@@ -33,64 +58,78 @@ func randBg() []byte {
 	return []byte("\x1b[" + fmt.Sprintf("%d", bg) + "m")
 }
 
-func termHandler(w http.ResponseWriter, r *http.Request) {
-	// black fore and background
-	w.Header().Add("Fart", "\x1b[30m \x1b[40m")
+func duck(x int, y int) []byte {
+	d := []byte("\n" + fmt.Sprintf(`%[1]s%[2]s    _
+%[2]s __(.)<
+%[2]s \_)_)
+`, strings.Repeat("\n", y), strings.Repeat(" ", x)))
+	return joinBytes([][]byte{clearTerm, cursorTopLeft, d, randBg(), randFg()})
+}
 
-	// w.Header().Add("Transfer-Encoding", "chunked")
+func streamData(w http.ResponseWriter, r *http.Request) {
+	log.Printf("new 🦆 connection from %s", r.RemoteAddr)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 
-	// hide cursor
-	_, _ = w.Write(HIDE_CURSOR)
-	_, _ = w.Write(CLEAR)
-	_, _ = w.Write(CURSOR_TOP_LEFT)
+	done := make(chan struct{})
 
-	nl := 0
-	padding := 0
-	for {
-		if padding < 64 {
-			padding += 1
-		} else if nl > 12 {
-			padding = 0
-			nl = 0
-		} else {
-			padding = 0
-			nl += 1
+	go func() {
+		defer close(done)
+
+		_, err := w.Write(joinBytes([][]byte{hideCursor, clearTerm, cursorTopLeft}))
+		if err != nil {
+			return
 		}
 
-		_, _ = w.Write(CLEAR)
-		_, _ = w.Write(CURSOR_TOP_LEFT)
+		x := 0
+		y := 0
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				if x < 64 {
+					x += 1
+				} else if y < 12 {
+					x = 0
+					y += 1
+				} else {
+					x = 0
+					y = 0
+				}
 
-		_, _ = w.Write([]byte("\n" + fmt.Sprintf(`%[1]s%[2]s    _
-%[2]s __(.)<
-%[2]s \_)_)
-`, strings.Repeat("\n", nl), strings.Repeat(" ", padding))))
+				_, err := w.Write(duck(x, y))
+				if err != nil {
+					return
+				}
 
-		// random background and foreground
-		_, _ = w.Write(randFg())
-		_, _ = w.Write(randBg())
+				flusher.Flush()
+				time.Sleep(refresh)
+			}
+		}
+	}()
 
-		// show output in terminal
-		flusher.Flush()
-		time.Sleep(refresh)
-	}
+	<-r.Context().Done()
+	done <- struct{}{}
+
+	log.Printf("closed 🦆 connection from %s", r.RemoteAddr)
 }
 
 func startServer() {
-	log.Printf("starting Duck 🦆 %s on %s", VERSION, addr)
+	log.Printf("starting 🦆 %s on %s", Version, addr)
 
-	http.HandleFunc("/", termHandler)
+	http.HandleFunc("/", streamData)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
 func main() {
-	flag.StringVar(&addr, "addr", "localhost:8000", "http service address")
-	flag.DurationVar(&refresh, "refresh", 100*time.Millisecond, "refresh interval")
+	flag.StringVar(&addr, "addr", addr, "http address")
+	flag.DurationVar(&refresh, "refresh", refresh, "refresh interval")
+
 	flag.Parse()
 
 	startServer()
