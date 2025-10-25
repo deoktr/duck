@@ -59,21 +59,32 @@ func randBg() []byte {
 }
 
 func duck(x int, y int) []byte {
-	d := []byte("\n" + fmt.Sprintf(`%[1]s%[2]s    _
+	d := fmt.Appendf(nil, `%[1]s%[2]s    _
 %[2]s __(.)<
 %[2]s \_)_)
-`, strings.Repeat("\n", y), strings.Repeat(" ", x)))
-	return joinBytes([][]byte{clearTerm, cursorTopLeft, d, randBg(), randFg()})
+`, strings.Repeat("\n", y), strings.Repeat(" ", x))
+	return joinBytes([][]byte{clearTerm, cursorTopLeft, d})
 }
 
 func streamData(w http.ResponseWriter, r *http.Request) {
-	log.Printf("new 🦆 connection from %s", r.RemoteAddr)
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+
+	userAgent := r.Header.Get("user-agent")
+	if !strings.HasPrefix(userAgent, "curl") {
+		log.Printf("no curl, no 🦆 %s", userAgent)
+		http.Error(w, "curl me", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("new 🦆 connection from %s %s", r.RemoteAddr, userAgent)
+
+	params := r.URL.Query()
+	enableRandBg := params.Get("bg") == "1"
+	enableRandFg := params.Get("fg") == "1"
 
 	done := make(chan struct{})
 
@@ -102,7 +113,16 @@ func streamData(w http.ResponseWriter, r *http.Request) {
 					y = 0
 				}
 
-				_, err := w.Write(duck(x, y))
+				d := duck(x, y)
+
+				if enableRandBg {
+					d = joinBytes([][]byte{d, randBg()})
+				}
+				if enableRandFg {
+					d = joinBytes([][]byte{d, randFg()})
+				}
+
+				_, err := w.Write(d)
 				if err != nil {
 					return
 				}
