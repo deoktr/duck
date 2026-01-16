@@ -1,4 +1,4 @@
-FROM docker.io/library/golang:1.25.3-alpine AS build
+FROM docker.io/library/golang:1.25-alpine AS build
 
 ARG VERSION=dev
 
@@ -13,7 +13,7 @@ RUN go build -o /duck \
 	-trimpath \
 	-ldflags "-X 'main.Version=${VERSION}'"
 
-FROM scratch
+FROM gcr.io/distroless/static-debian13:nonroot
 
 COPY --from=build /duck /duck
-CMD ["/duck"]
+ENTRYPOINT ["/duck"]
